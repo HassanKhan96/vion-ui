@@ -86,6 +86,7 @@ export type Query = {
   myfriends: Array<PublicUser>;
   unFriend: Scalars['String']['output'];
   user?: Maybe<PublicUser>;
+  userByEmail?: Maybe<PublicUser>;
 };
 
 
@@ -101,6 +102,11 @@ export type QueryUnFriendArgs = {
 
 export type QueryUserArgs = {
   id: Scalars['ID']['input'];
+};
+
+
+export type QueryUserByEmailArgs = {
+  email: Scalars['String']['input'];
 };
 
 export type User = {
