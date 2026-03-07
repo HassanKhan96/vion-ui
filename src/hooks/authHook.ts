@@ -25,6 +25,10 @@ export const useAuth = () => {
         authTokenVar(null);
     }
 
+    const updateUser = (user: User | null) => {
+        setUser(user);
+    }
+
     const isAuthenticated = () => {
         return !!user && !!accessToken;
     }
@@ -36,6 +40,7 @@ export const useAuth = () => {
         loading,
         setAuth,
         setToken,
+        updateUser,
         clearAuth,
         isAuthenticated,
     }

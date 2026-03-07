@@ -1,15 +1,25 @@
+import { gql } from "@apollo/client";
 
-
-import { graphql } from "../graphql-types";
-
-
-export const GET_CURRENT_USER = graphql(`
-    query GetCurrentUser {
-        me {
-            id
-            username
-            email
-            created_at
-        }
+export const GET_CURRENT_USER = gql`
+  query GetCurrentUser {
+    me {
+      id
+      username
+      email
+      avatar_url
+      created_at
     }
-`);
+  }
+`;
+
+export const UPLOAD_MY_AVATAR = gql`
+  mutation UploadMyAvatar($input: AvatarUploadInput!) {
+    uploadMyAvatar(input: $input) {
+      id
+      username
+      email
+      avatar_url
+      created_at
+    }
+  }
+`;

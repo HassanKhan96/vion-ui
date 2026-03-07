@@ -4,7 +4,7 @@ import {
   MessageSquare,
   MoreVertical,
   LogOut,
-  User,
+  Camera,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/Button";
@@ -14,8 +14,11 @@ import type { CurrentChatUser } from "../../interfaces/user.interface";
 import { useConversation } from "../../hooks/conversationHook";
 import { useAuth } from "../../hooks/authHook";
 import { useApi } from "../../hooks/useApi";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ChangeEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useMutation } from "@apollo/client/react";
+import { UPLOAD_MY_AVATAR } from "../../graphql/user.queries";
+import { getConfig } from "../../config/Application";
 
 type Props = {
   className?: string;
@@ -32,10 +35,14 @@ export const ChatSidebar = ({
   onSelectConversation,
 }: Props) => {
   const { conversations } = useConversation();
-  const { user, clearAuth } = useAuth();
+  const { user, clearAuth, updateUser } = useAuth();
   const { logout } = useApi();
+  const { BASE_URL } = getConfig();
+  const [uploadAvatar, { loading: avatarUploading }] =
+    useMutation(UPLOAD_MY_AVATAR);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -64,11 +71,17 @@ export const ChatSidebar = ({
     username: string,
     avatar?: string | null,
   ) => {
+    const avatarSrc = avatar
+      ? avatar.startsWith("http")
+        ? avatar
+        : `${BASE_URL}${avatar}`
+      : null;
+
     onSelectConversation(conversation);
     onSetCurrentChatUser({
       id: user_id,
       username,
-      avatar,
+      avatar: avatarSrc,
       email: "",
       created_at: "",
       status: "",
@@ -78,6 +91,57 @@ export const ChatSidebar = ({
   const initials = user?.username
     ? user.username.slice(0, 2).toUpperCase()
     : "?";
+
+  const avatarSrc = user?.avatar_url
+    ? user.avatar_url.startsWith("http")
+      ? user.avatar_url
+      : `${BASE_URL}${user.avatar_url}`
+    : null;
+
+  const toBase64 = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ""));
+      reader.onerror = () => reject(new Error("Could not read image file"));
+      reader.readAsDataURL(file);
+    });
+
+  const handleAvatarChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      event.target.value = "";
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      event.target.value = "";
+      return;
+    }
+
+    try {
+      const base64 = await toBase64(file);
+      const response = await uploadAvatar({
+        variables: {
+          input: {
+            base64,
+            filename: file.name,
+            mimeType: file.type,
+          },
+        },
+      });
+
+      const nextUser = (response.data as any)?.uploadMyAvatar;
+      if (nextUser) {
+        updateUser(nextUser);
+      }
+    } catch (error) {
+      console.log(error);
+    } finally {
+      event.target.value = "";
+    }
+  };
 
   return (
     <div
@@ -92,7 +156,15 @@ export const ChatSidebar = ({
           {/* Avatar + Name */}
           <div className="flex items-center gap-3 min-w-0">
             <div className="h-10 w-10 rounded-full bg-primary flex items-center justify-center flex-shrink-0 shadow-sm shadow-primary/30">
-              <span className="text-sm font-bold text-white">{initials}</span>
+              {avatarSrc ? (
+                <img
+                  src={avatarSrc}
+                  alt="Profile avatar"
+                  className="h-10 w-10 rounded-full object-cover"
+                />
+              ) : (
+                <span className="text-sm font-bold text-white">{initials}</span>
+              )}
             </div>
             <div className="min-w-0">
               <p className="text-sm font-semibold truncate text-foreground">
@@ -126,10 +198,13 @@ export const ChatSidebar = ({
                 >
                   <button
                     className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/60 transition-colors text-foreground"
-                    onClick={() => setMenuOpen(false)}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      fileInputRef.current?.click();
+                    }}
                   >
-                    <User className="h-4 w-4 text-muted-foreground" />
-                    Profile
+                    <Camera className="h-4 w-4 text-muted-foreground" />
+                    {avatarUploading ? "Uploading..." : "Upload Avatar"}
                   </button>
                   <div className="h-px bg-border mx-3" />
                   <button
@@ -142,6 +217,13 @@ export const ChatSidebar = ({
                 </motion.div>
               )}
             </AnimatePresence>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              onChange={handleAvatarChange}
+              className="hidden"
+            />
           </div>
         </div>
       </div>
@@ -166,14 +248,14 @@ export const ChatSidebar = ({
       {/* Conversation List */}
       <div className="flex-1 overflow-y-auto p-2 space-y-2">
         {conversations.map((conversation) => (
-          <button
+              <button
             key={conversation.conversation_id}
             onClick={() =>
               handleConversationSelect(
                 conversation.conversation_id,
                 conversation.other_user_id,
                 conversation.username,
-                null,
+                (conversation as any).avatar_url ?? null,
               )
             }
             className={cn(
@@ -184,9 +266,21 @@ export const ChatSidebar = ({
             )}
           >
             <div className="flex-shrink-0">
-              <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                <MessageSquare className="h-5 w-5 text-primary" />
-              </div>
+              {(conversation as any).avatar_url ? (
+                <img
+                  src={
+                    String((conversation as any).avatar_url).startsWith("http")
+                      ? String((conversation as any).avatar_url)
+                      : `${BASE_URL}${String((conversation as any).avatar_url)}`
+                  }
+                  alt={`${conversation.username} avatar`}
+                  className="h-10 w-10 rounded-full object-cover"
+                />
+              ) : (
+                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+                  <MessageSquare className="h-5 w-5 text-primary" />
+                </div>
+              )}
             </div>
             <div className="flex-1 overflow-hidden">
               <div className="flex items-center justify-between">

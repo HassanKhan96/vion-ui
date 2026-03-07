@@ -1,4 +1,10 @@
-import React, { useState, useRef, useEffect, useEffectEvent } from "react";
+import React, {
+  useState,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  useEffectEvent,
+} from "react";
 import {
   Send,
   Phone,
@@ -19,7 +25,6 @@ import { useConversation } from "../../hooks/conversationHook";
 import { MessageStatus } from "./MessageStatus";
 import UserPresence from "./UserPresence";
 import { StartNewChat } from "./StartNewChat";
-import { useAuth } from "../../hooks/authHook";
 
 type Props = {
   className?: string;
@@ -42,18 +47,36 @@ export const ChatArea = ({
   setCurrentUserTypingStatus,
 }: Props) => {
   const { socket } = useSocket();
-  const { getChatFromId, chats, addMessageToChat } = useConversation();
+  const {
+    getChatFromId,
+    loadOlderMessages,
+    hasMoreByConversation,
+    loadingOlderByConversation,
+    chats,
+    addMessageToChat,
+  } = useConversation();
   const hasSetTyping = useRef(false);
+  const shouldAutoScrollToBottom = useRef(true);
+  const isLoadingOlderRef = useRef(false);
+  const previousScrollHeightRef = useRef(0);
+  const previousScrollTopRef = useRef(0);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   let messages = chats[currentConversation || ""] || [];
 
   const [inputValue, setInputValue] = useState("");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   const lastReadMessageId = useRef<string | null>(null);
+  const hasMore = currentConversation
+    ? (hasMoreByConversation[currentConversation] ?? true)
+    : false;
+  const isLoadingOlder = currentConversation
+    ? (loadingOlderByConversation[currentConversation] ?? false)
+    : false;
 
   const markReadEvent = useEffectEvent(
     (currentConversation: string | null, allMessages: Message[]) => {
-      if (!currentConversation) return;
+      const senderId = currentChatUser?.id;
+      if (!currentConversation || !senderId) return;
 
       const sortedMessages = allMessages
         ?.filter((m) => m.sender !== "me" && m.status !== "read")
@@ -66,7 +89,7 @@ export const ChatArea = ({
       if (unreadMessages) {
         socket?.emit("mark_messages_read", {
           conversation_id: currentConversation,
-          sender_id: currentChatUser?.id,
+          sender_id: senderId,
         });
 
         lastReadMessageId.current = unreadMessages.id;
@@ -115,53 +138,112 @@ export const ChatArea = ({
 
   useEffect(() => {
     if (currentConversation) {
-      getChatFromId(currentConversation);
+      shouldAutoScrollToBottom.current = true;
+      lastReadMessageId.current = null;
+      void getChatFromId(currentConversation);
     }
   }, [currentConversation]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  useLayoutEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    if (isLoadingOlderRef.current) {
+      const nextScrollTop =
+        container.scrollHeight -
+        previousScrollHeightRef.current +
+        previousScrollTopRef.current;
+      container.scrollTop = Math.max(nextScrollTop, 0);
+      isLoadingOlderRef.current = false;
+      return;
+    }
+
+    if (shouldAutoScrollToBottom.current) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }, [messages, currentConversation]);
 
   useEffect(() => {
     markReadEvent(currentConversation, messages);
   }, [currentConversation, messages]);
 
   useEffect(() => {
+    if (!socket || !currentConversation || !currentChatUser?.id) {
+      hasSetTyping.current = false;
+      return;
+    }
+
     if (inputValue?.length && !hasSetTyping.current) {
       hasSetTyping.current = true;
-      socket?.emit("typing", {
+      socket.emit("typing", {
         conversation_id: currentConversation,
-        sender_id: currentChatUser?.id,
+        sender_id: currentChatUser.id,
       });
     }
 
     if (!inputValue?.length && hasSetTyping.current) {
       hasSetTyping.current = false;
-      socket?.emit("stop_typing", {
+      socket.emit("stop_typing", {
         conversation_id: currentConversation,
-        sender_id: currentChatUser?.id,
+        sender_id: currentChatUser.id,
       });
     }
   }, [inputValue, socket, currentConversation, currentChatUser?.id]);
 
+  const handleMessagesScroll = async () => {
+    const container = messagesContainerRef.current;
+    if (!container || !currentConversation) return;
+
+    const distanceFromBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight;
+    shouldAutoScrollToBottom.current = distanceFromBottom < 120;
+
+    if (
+      container.scrollTop <= 40 &&
+      hasMore &&
+      !isLoadingOlder &&
+      !isLoadingOlderRef.current
+    ) {
+      isLoadingOlderRef.current = true;
+      previousScrollHeightRef.current = container.scrollHeight;
+      previousScrollTopRef.current = container.scrollTop;
+      await loadOlderMessages(currentConversation);
+
+      const nextContainer = messagesContainerRef.current;
+      if (
+        nextContainer &&
+        nextContainer.scrollHeight === previousScrollHeightRef.current
+      ) {
+        isLoadingOlderRef.current = false;
+      }
+    }
+  };
+
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputValue.trim()) return;
+    if (
+      !inputValue.trim() ||
+      !currentConversation ||
+      !currentChatUser?.id ||
+      !socket
+    ) {
+      return;
+    }
 
     let newMessage = {
       id: uuidv4(),
       conversation_id: currentConversation,
       sender: "me",
-      to: currentChatUser?.id,
+      to: currentChatUser.id,
       content: inputValue,
       created_at: Date.now().toString(),
       status: "pending",
     } as ConversationMessage;
 
+    shouldAutoScrollToBottom.current = true;
     addMessageToChat(newMessage);
 
-    socket?.emit("send_message", {
+    socket.emit("send_message", {
       ...newMessage,
       created_at: Number(newMessage.created_at),
     });
@@ -178,11 +260,19 @@ export const ChatArea = ({
       {/* Header */}
       <div className="flex items-center justify-between p-4 border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="flex items-center space-x-4">
-          <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-            <span className="font-semibold text-primary">
-              {currentChatUser?.username.charAt(0).toUpperCase()}
-            </span>
-          </div>
+          {currentChatUser?.avatar ? (
+            <img
+              src={currentChatUser.avatar}
+              alt={`${currentChatUser.username} avatar`}
+              className="h-10 w-10 rounded-full object-cover"
+            />
+          ) : (
+            <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
+              <span className="font-semibold text-primary">
+                {currentChatUser?.username.charAt(0).toUpperCase()}
+              </span>
+            </div>
+          )}
           <div>
             <h3 className="font-semibold">{currentChatUser?.username}</h3>
             <UserPresence
@@ -205,7 +295,16 @@ export const ChatArea = ({
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div
+        ref={messagesContainerRef}
+        onScroll={handleMessagesScroll}
+        className="flex-1 overflow-y-auto p-4 space-y-4"
+      >
+        {isLoadingOlder && (
+          <div className="text-center text-xs text-muted-foreground py-1">
+            Loading older messages...
+          </div>
+        )}
         {messages.map((message) => {
           return (
             <div
@@ -254,7 +353,6 @@ export const ChatArea = ({
             </div>
           </div>
         )}
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Input */}

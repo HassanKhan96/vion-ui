@@ -5,6 +5,7 @@ import { GET_CONVERSATIONS, GET_MESSAGES } from "../graphql/conversation.queries
 import { useAuth } from "../hooks/authHook";
 import useSocket from "../hooks/socketHook";
 
+const PAGE_SIZE = 15;
 
 type MessageSent = {
     temp_id: string;
@@ -18,18 +19,24 @@ type MessageSent = {
 export type ConversationContextType = {
     conversations: Conversation[],
     chats: Record<string, Message[]>,
+    hasMoreByConversation: Record<string, boolean>,
+    loadingOlderByConversation: Record<string, boolean>,
     setConversations: React.Dispatch<React.SetStateAction<Conversation[]>>,
     setChats: React.Dispatch<React.SetStateAction<Record<string, Message[]>>>,
     getChatFromId: (conversation_id: string) => Promise<Message[] | undefined>,
+    loadOlderMessages: (conversation_id: string) => Promise<void>,
     addMessageToChat: (message: Message) => void,
 }
 
 export const conversationContext = createContext<ConversationContextType>({
     conversations: [],
     chats: {},
+    hasMoreByConversation: {},
+    loadingOlderByConversation: {},
     setConversations: () => { },
     setChats: () => { },
     getChatFromId: () => Promise.resolve([]),
+    loadOlderMessages: () => Promise.resolve(),
     addMessageToChat: () => { },
 });
 
@@ -45,6 +52,8 @@ export default function ConversationProvider({ children }: ProviderProps) {
 
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [chats, setChats] = useState<Record<string, Message[]>>({});
+    const [hasMoreByConversation, setHasMoreByConversation] = useState<Record<string, boolean>>({});
+    const [loadingOlderByConversation, setLoadingOlderByConversation] = useState<Record<string, boolean>>({});
 
     const [getConversations] = useLazyQuery(GET_CONVERSATIONS);
     const [getMessages] = useLazyQuery(GET_MESSAGES);
@@ -55,33 +64,32 @@ export default function ConversationProvider({ children }: ProviderProps) {
             getMyConversations();
     }, [user]);
 
-    useEffect(() => {
-        if (!socket) return;
-
-        socket?.on("on-connection", (data) => {
-            console.log("Chat server replied", data);
-        });
-
-
-        socket?.on("new_message", addMessageToChat);
-
-        socket?.on("message_sent", updateMessageOnSent);
-
-        socket?.on("messages_read", markMessagesAsRead);
-
-    }, [socket])
-
-
     const getMyConversations = async () => {
         try {
             const { data } = await getConversations()
-            let myConversations = data?.myConversations || []
+            let myConversations = (data as any)?.myConversations || []
             setConversations(myConversations);
         } catch (error) {
             console.log(error)
         }
     }
 
+    const mergeUniqueMessages = (
+        existing: Message[],
+        incoming: Message[],
+        mode: "prepend" | "append"
+    ) => {
+        const seen = new Set<string>();
+        const list = mode === "prepend"
+            ? [...incoming, ...existing]
+            : [...existing, ...incoming];
+
+        return list.filter((message) => {
+            if (seen.has(message.id)) return false;
+            seen.add(message.id);
+            return true;
+        });
+    };
 
     const updateMessageOnSent = useCallback((payload: MessageSent) => {
 
@@ -133,21 +141,90 @@ export default function ConversationProvider({ children }: ProviderProps) {
 
 
 
-    const getChatFromId = async (conversation_id: string) => {
+    const getChatFromId = useCallback(async (conversation_id: string) => {
         try {
             if (chats[conversation_id]) return chats[conversation_id];
 
-            let chatResponse = await getMessages({ variables: { conversation_id } })
-            let messages = chatResponse.data?.getAllConversation || []
+            let chatResponse = await getMessages({
+                variables: {
+                    conversation_id,
+                    limit: PAGE_SIZE,
+                }
+            })
+            let messages = (chatResponse.data as any)?.getAllConversation || []
             setChats(prev => ({
                 ...prev,
                 [conversation_id]: messages
+            }));
+            setHasMoreByConversation((prev) => ({
+                ...prev,
+                [conversation_id]: messages.length === PAGE_SIZE
             }));
             return messages;
         } catch (error) {
             console.log(error);
         }
-    };
+    }, [chats, getMessages]);
+
+    const loadOlderMessages = useCallback(async (conversation_id: string) => {
+        if (loadingOlderByConversation[conversation_id]) return;
+        if (hasMoreByConversation[conversation_id] === false) return;
+
+        const currentMessages = chats[conversation_id] || [];
+        if (!currentMessages.length) {
+            await getChatFromId(conversation_id);
+            return;
+        }
+
+        const oldestMessage = currentMessages[0];
+        if (!oldestMessage?.created_at) {
+            setHasMoreByConversation((prev) => ({
+                ...prev,
+                [conversation_id]: false
+            }));
+            return;
+        }
+
+        setLoadingOlderByConversation((prev) => ({
+            ...prev,
+            [conversation_id]: true
+        }));
+
+        try {
+            const response = await getMessages({
+                variables: {
+                    conversation_id,
+                    limit: PAGE_SIZE,
+                    before: oldestMessage.created_at,
+                }
+            });
+
+            const olderMessages = (response.data as any)?.getAllConversation || [];
+
+            setHasMoreByConversation((prev) => ({
+                ...prev,
+                [conversation_id]: olderMessages.length === PAGE_SIZE
+            }));
+
+            if (!olderMessages.length) return;
+
+            setChats((prev) => ({
+                ...prev,
+                [conversation_id]: mergeUniqueMessages(
+                    prev[conversation_id] || [],
+                    olderMessages,
+                    "prepend",
+                ),
+            }));
+        } catch (error) {
+            console.log(error);
+        } finally {
+            setLoadingOlderByConversation((prev) => ({
+                ...prev,
+                [conversation_id]: false
+            }));
+        }
+    }, [chats, getChatFromId, getMessages, hasMoreByConversation, loadingOlderByConversation]);
 
     const addMessageToChat = useCallback((message: Message) => {
         setConversations(prev => prev.map(conversation => {
@@ -163,17 +240,44 @@ export default function ConversationProvider({ children }: ProviderProps) {
         }))
         setChats(prev => ({
             ...prev,
-            [message.conversation_id]: [...(prev[message.conversation_id] || []), message]
+            [message.conversation_id]: mergeUniqueMessages(
+                prev[message.conversation_id] || [],
+                [message],
+                "append",
+            )
         }));
     }, []);
+
+    useEffect(() => {
+        if (!socket) return;
+
+        const onConnection = (data: unknown) => {
+            console.log("Chat server replied", data);
+        };
+
+        socket.on("on-connection", onConnection);
+        socket.on("new_message", addMessageToChat);
+        socket.on("message_sent", updateMessageOnSent);
+        socket.on("messages_read", markMessagesAsRead);
+
+        return () => {
+            socket.off("on-connection", onConnection);
+            socket.off("new_message", addMessageToChat);
+            socket.off("message_sent", updateMessageOnSent);
+            socket.off("messages_read", markMessagesAsRead);
+        };
+    }, [socket, addMessageToChat, markMessagesAsRead, updateMessageOnSent]);
 
     return (
         <conversationContext.Provider value={{
             conversations,
             chats,
+            hasMoreByConversation,
+            loadingOlderByConversation,
             setConversations,
             setChats,
             getChatFromId,
+            loadOlderMessages,
             addMessageToChat
         }}>
             {children}

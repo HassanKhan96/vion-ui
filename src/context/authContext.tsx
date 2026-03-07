@@ -49,7 +49,7 @@ export const AuthContextProvider = ({ children }: { children: React.ReactNode })
             }
 
             let user = await getUser();
-            let userData = user.data?.me
+            let userData = (user.data as any)?.me
             if (!userData) throw new Error('No user found')
             setUser(userData);
         } catch (error) {
