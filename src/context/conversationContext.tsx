@@ -25,6 +25,8 @@ export type ConversationContextType = {
     setChats: React.Dispatch<React.SetStateAction<Record<string, Message[]>>>,
     getChatFromId: (conversation_id: string) => Promise<Message[] | undefined>,
     loadOlderMessages: (conversation_id: string) => Promise<void>,
+    ensureConversation: (conversation: Conversation) => void,
+    removeConversation: (conversation_id: string) => void,
     addMessageToChat: (message: Message) => void,
 }
 
@@ -37,6 +39,8 @@ export const conversationContext = createContext<ConversationContextType>({
     setChats: () => { },
     getChatFromId: () => Promise.resolve([]),
     loadOlderMessages: () => Promise.resolve(),
+    ensureConversation: () => { },
+    removeConversation: () => { },
     addMessageToChat: () => { },
 });
 
@@ -248,6 +252,40 @@ export default function ConversationProvider({ children }: ProviderProps) {
         }));
     }, []);
 
+    const ensureConversation = useCallback((conversation: Conversation) => {
+        setConversations((prev) => {
+            const exists = prev.some(
+                (item) => item.conversation_id === conversation.conversation_id
+            );
+            if (exists) return prev;
+            return [conversation, ...prev];
+        });
+    }, []);
+
+    const removeConversation = useCallback((conversation_id: string) => {
+        setConversations((prev) =>
+            prev.filter((item) => item.conversation_id !== conversation_id)
+        );
+
+        setChats((prev) => {
+            const next = { ...prev };
+            delete next[conversation_id];
+            return next;
+        });
+
+        setHasMoreByConversation((prev) => {
+            const next = { ...prev };
+            delete next[conversation_id];
+            return next;
+        });
+
+        setLoadingOlderByConversation((prev) => {
+            const next = { ...prev };
+            delete next[conversation_id];
+            return next;
+        });
+    }, []);
+
     useEffect(() => {
         if (!socket) return;
 
@@ -278,6 +316,8 @@ export default function ConversationProvider({ children }: ProviderProps) {
             setChats,
             getChatFromId,
             loadOlderMessages,
+            ensureConversation,
+            removeConversation,
             addMessageToChat
         }}>
             {children}

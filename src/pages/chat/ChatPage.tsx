@@ -26,6 +26,11 @@ export const ChatPage = () => {
     });
   };
 
+  const handleConversationDeleted = () => {
+    setCurrenConversation(null);
+    setCurrentChatUser(null);
+  };
+
   return (
     <div className="flex h-screen bg-background overflow-hidden">
       <div className="hidden md:block w-80 flex-shrink-0">
@@ -42,6 +47,7 @@ export const ChatPage = () => {
           currentChatUser={currentChatUser}
           setCurrentUserStatus={setCurrentUserStatus}
           setCurrentUserTypingStatus={setCurrentUserTypingStatus}
+          onConversationDeleted={handleConversationDeleted}
         />
       </main>
     </div>

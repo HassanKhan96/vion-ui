@@ -10,6 +10,8 @@ export const useConversation = () => {
         loadingOlderByConversation,
         getChatFromId,
         loadOlderMessages,
+        ensureConversation,
+        removeConversation,
         addMessageToChat
     } = useContext(conversationContext);
 
@@ -20,6 +22,8 @@ export const useConversation = () => {
         loadingOlderByConversation,
         getChatFromId,
         loadOlderMessages,
+        ensureConversation,
+        removeConversation,
         addMessageToChat
     }
 }

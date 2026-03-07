@@ -35,3 +35,9 @@ export const GET_MESSAGES = gql`
     }
   }
 `;
+
+export const DELETE_MY_CONVERSATION = gql`
+  mutation DeleteMyConversation($conversation_id: ID!) {
+    deleteMyConversation(conversation_id: $conversation_id)
+  }
+`;

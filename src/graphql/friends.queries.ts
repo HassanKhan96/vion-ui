@@ -1,13 +1,31 @@
+import { gql } from "@apollo/client";
 
-import { graphql } from "../graphql-types";
+export const GET_FRIENDS = gql`
+  query GetFriends {
+    myfriends {
+      id
+      username
+      email
+      avatar_url
+      created_at
+    }
+  }
+`;
 
-export const GET_FRIENDS = graphql(`
-    query getFriends {
-        myfriends {
-            id
-            username
-            email
-            created_at
-        }
-    }  
-`)
+export const FIND_USER_BY_EMAIL = gql`
+  query FindUserByEmail($email: String!) {
+    userByEmail(email: $email) {
+      id
+      username
+      email
+      avatar_url
+      created_at
+    }
+  }
+`;
+
+export const SEND_FRIEND_REQUEST = gql`
+  mutation SendFriendRequest($toUserId: ID!) {
+    sendFriendRequest(toUserId: $toUserId)
+  }
+`;

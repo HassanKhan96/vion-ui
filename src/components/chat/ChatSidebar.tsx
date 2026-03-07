@@ -19,6 +19,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useMutation } from "@apollo/client/react";
 import { UPLOAD_MY_AVATAR } from "../../graphql/user.queries";
 import { getConfig } from "../../config/Application";
+import NewChatModal from "./NewChatModal";
+import { getConversationId } from "../../lib/conversation";
+import type { User as VionUser } from "../../interfaces/user.interface";
 
 type Props = {
   className?: string;
@@ -34,13 +37,14 @@ export const ChatSidebar = ({
   onSetCurrentChatUser,
   onSelectConversation,
 }: Props) => {
-  const { conversations } = useConversation();
+  const { conversations, ensureConversation } = useConversation();
   const { user, clearAuth, updateUser } = useAuth();
   const { logout } = useApi();
   const { BASE_URL } = getConfig();
   const [uploadAvatar, { loading: avatarUploading }] =
     useMutation(UPLOAD_MY_AVATAR);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [isNewChatModalOpen, setIsNewChatModalOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -86,6 +90,40 @@ export const ChatSidebar = ({
       created_at: "",
       status: "",
     });
+  };
+
+  const handleStartChatWithUser = async (targetUser: VionUser) => {
+    if (!user?.id) return;
+
+    const existingConversation = conversations.find(
+      (conversation) => conversation.other_user_id === targetUser.id,
+    );
+
+    const conversationId =
+      existingConversation?.conversation_id ??
+      (await getConversationId(user.id, targetUser.id));
+
+    ensureConversation({
+      conversation_id: conversationId,
+      type: "direct",
+      created_at: Date.now().toString(),
+      last_read_message_id: null,
+      last_message_id: null,
+      last_message: null,
+      last_message_at: null,
+      other_user_id: targetUser.id,
+      username: targetUser.username,
+      avatar_url: targetUser.avatar_url ?? null,
+    } as any);
+
+    handleConversationSelect(
+      conversationId,
+      targetUser.id,
+      targetUser.username,
+      targetUser.avatar_url ?? null,
+    );
+
+    setIsNewChatModalOpen(false);
   };
 
   const initials = user?.username
@@ -232,7 +270,11 @@ export const ChatSidebar = ({
       <div className="p-4 border-b border-border space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold tracking-tight">Messages</h2>
-          <Button size="icon" variant="ghost">
+          <Button
+            size="icon"
+            variant="ghost"
+            onClick={() => setIsNewChatModalOpen(true)}
+          >
             <Plus className="h-5 w-5" />
           </Button>
         </div>
@@ -298,6 +340,13 @@ export const ChatSidebar = ({
           </button>
         ))}
       </div>
+
+      <NewChatModal
+        open={isNewChatModalOpen}
+        currentUserId={user?.id}
+        onClose={() => setIsNewChatModalOpen(false)}
+        onStartChat={handleStartChatWithUser}
+      />
     </div>
   );
 };

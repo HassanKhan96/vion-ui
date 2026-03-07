@@ -10,6 +10,7 @@ import {
   Phone,
   Video,
   MoreVertical,
+  Trash2,
   Paperclip,
   Smile,
 } from "lucide-react";
@@ -25,6 +26,8 @@ import { useConversation } from "../../hooks/conversationHook";
 import { MessageStatus } from "./MessageStatus";
 import UserPresence from "./UserPresence";
 import { StartNewChat } from "./StartNewChat";
+import { useMutation } from "@apollo/client/react";
+import { DELETE_MY_CONVERSATION } from "../../graphql/conversation.queries";
 
 type Props = {
   className?: string;
@@ -32,6 +35,7 @@ type Props = {
   currentChatUser?: CurrentChatUser | null;
   setCurrentUserStatus: (status: string, lastSeen?: number | null) => void;
   setCurrentUserTypingStatus: (isTyping: boolean) => void;
+  onConversationDeleted: () => void;
 };
 
 type ConversationMessage = Message & {
@@ -45,6 +49,7 @@ export const ChatArea = ({
   currentChatUser,
   setCurrentUserStatus,
   setCurrentUserTypingStatus,
+  onConversationDeleted,
 }: Props) => {
   const { socket } = useSocket();
   const {
@@ -53,18 +58,23 @@ export const ChatArea = ({
     hasMoreByConversation,
     loadingOlderByConversation,
     chats,
+    removeConversation,
     addMessageToChat,
   } = useConversation();
+  const [deleteMyConversation] = useMutation(DELETE_MY_CONVERSATION);
   const hasSetTyping = useRef(false);
   const shouldAutoScrollToBottom = useRef(true);
   const isLoadingOlderRef = useRef(false);
   const previousScrollHeightRef = useRef(0);
   const previousScrollTopRef = useRef(0);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const actionsMenuRef = useRef<HTMLDivElement>(null);
 
   let messages = chats[currentConversation || ""] || [];
 
   const [inputValue, setInputValue] = useState("");
+  const [isActionsMenuOpen, setIsActionsMenuOpen] = useState(false);
+  const [deletingConversation, setDeletingConversation] = useState(false);
   const lastReadMessageId = useRef<string | null>(null);
   const hasMore = currentConversation
     ? (hasMoreByConversation[currentConversation] ?? true)
@@ -135,6 +145,22 @@ export const ChatArea = ({
       socket?.off("stopped_typing", onStopTyping);
     };
   }, [socket, currentChatUser?.id]);
+
+  useEffect(() => {
+    if (!isActionsMenuOpen) return;
+
+    const onClickOutside = (event: MouseEvent) => {
+      if (
+        actionsMenuRef.current &&
+        !actionsMenuRef.current.contains(event.target as Node)
+      ) {
+        setIsActionsMenuOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [isActionsMenuOpen]);
 
   useEffect(() => {
     if (currentConversation) {
@@ -251,6 +277,24 @@ export const ChatArea = ({
     setInputValue("");
   };
 
+  const handleDeleteConversation = async () => {
+    if (!currentConversation || deletingConversation) return;
+
+    try {
+      setDeletingConversation(true);
+      await deleteMyConversation({
+        variables: { conversation_id: currentConversation },
+      });
+      removeConversation(currentConversation);
+      setIsActionsMenuOpen(false);
+      onConversationDeleted();
+    } catch (error) {
+      console.log(error);
+    } finally {
+      setDeletingConversation(false);
+    }
+  };
+
   if (!currentConversation) {
     return <StartNewChat />;
   }
@@ -288,9 +332,27 @@ export const ChatArea = ({
           <Button variant="ghost" size="icon">
             <Video className="h-5 w-5 text-muted-foreground" />
           </Button>
-          <Button variant="ghost" size="icon">
-            <MoreVertical className="h-5 w-5 text-muted-foreground" />
-          </Button>
+          <div className="relative" ref={actionsMenuRef}>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsActionsMenuOpen((prev) => !prev)}
+            >
+              <MoreVertical className="h-5 w-5 text-muted-foreground" />
+            </Button>
+            {isActionsMenuOpen && (
+              <div className="absolute right-0 top-full mt-2 w-44 bg-card border border-border rounded-xl shadow-xl overflow-hidden z-20">
+                <button
+                  className="w-full flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-destructive/10 transition-colors text-destructive"
+                  onClick={() => void handleDeleteConversation()}
+                  disabled={deletingConversation}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  {deletingConversation ? "Deleting..." : "Delete chat"}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
