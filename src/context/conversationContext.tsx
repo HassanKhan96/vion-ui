@@ -11,6 +11,7 @@ type MessageSent = {
     temp_id: string;
     conversation_id: string;
     id: string;
+    sender_id?: string;
     status: string;
     content: string;
     created_at: string;
@@ -32,6 +33,7 @@ export type ConversationContextType = {
     ensureConversation: (conversation: Conversation) => void,
     removeConversation: (conversation_id: string) => void,
     addMessageToChat: (message: Message) => void,
+    markConversationAsRead: (conversation_id: string) => void,
 }
 
 export const conversationContext = createContext<ConversationContextType>({
@@ -46,6 +48,7 @@ export const conversationContext = createContext<ConversationContextType>({
     ensureConversation: () => { },
     removeConversation: () => { },
     addMessageToChat: () => { },
+    markConversationAsRead: () => { },
 });
 
 
@@ -96,12 +99,23 @@ export default function ConversationProvider({ children }: ProviderProps) {
                     conversation.conversation_id === nextConversation.conversation_id
             );
 
+            const fallbackSenderId =
+                (nextConversation as any).last_message_sender_id ??
+                (existing as any)?.last_message_sender_id ??
+                null;
+            const fallbackStatus =
+                (nextConversation as any).last_message_status ??
+                (existing as any)?.last_message_status ??
+                null;
+
             const mergedConversation = {
                 ...(existing ?? {}),
                 ...nextConversation,
                 ...(latestMessage
                     ? {
                         last_message_id: latestMessage.id,
+                        last_message_sender_id: (latestMessage as any).sender_id ?? fallbackSenderId,
+                        last_message_status: (latestMessage as any).status ?? fallbackStatus,
                         last_message: latestMessage.content,
                         last_message_at: latestMessage.created_at,
                     }
@@ -166,9 +180,11 @@ export default function ConversationProvider({ children }: ProviderProps) {
             conversation_id: payload.conversation_id,
         } as Conversation, {
             id: payload.id,
+            sender_id: payload.sender_id,
+            status: payload.status,
             content: payload.content,
             created_at: payload.created_at,
-        });
+        } as any);
 
         setChats((prev) => {
             const chat = prev[payload.conversation_id];
@@ -201,7 +217,20 @@ export default function ConversationProvider({ children }: ProviderProps) {
                 [payload.conversation_id]: updatedChat,
             };
         });
-    }, []);
+        setConversations((prev) =>
+            prev.map((conversation) =>
+                conversation.conversation_id === payload.conversation_id
+                    ? {
+                        ...conversation,
+                        last_message_status:
+                            (conversation as any).last_message_sender_id === user?.id
+                                ? "read"
+                                : (conversation as any).last_message_status,
+                    }
+                    : conversation
+            )
+        );
+    }, [user?.id]);
 
 
 
@@ -304,15 +333,19 @@ export default function ConversationProvider({ children }: ProviderProps) {
         } else if (existingConversation) {
             upsertConversationInList(existingConversation, {
                 id: message.id,
+                sender_id: message.sender === "me" ? user?.id ?? null : message.sender_id,
+                status: message.status,
                 content: message.content,
                 created_at: message.created_at,
-            });
+            } as any);
         } else {
             void hydrateConversationIfMissing(message.conversation_id, {
                 id: message.id,
+                sender_id: message.sender === "me" ? user?.id ?? null : message.sender_id,
+                status: message.status,
                 content: message.content,
                 created_at: message.created_at,
-            });
+            } as any);
         }
 
         setChats(prev => ({
@@ -323,7 +356,32 @@ export default function ConversationProvider({ children }: ProviderProps) {
                 "append",
             )
         }));
+        if (message.sender !== "me" && !message.conversation) {
+            setConversations((prev) =>
+                prev.map((conversation) =>
+                    conversation.conversation_id === message.conversation_id
+                        ? {
+                            ...conversation,
+                            unread_count: Math.max(
+                                Number((conversation as any).unread_count ?? 0) + 1,
+                                1
+                            ),
+                        }
+                        : conversation
+                )
+            );
+        }
     }, [conversations, hydrateConversationIfMissing, upsertConversationInList]);
+
+    const markConversationAsRead = useCallback((conversation_id: string) => {
+        setConversations((prev) =>
+            prev.map((conversation) =>
+                conversation.conversation_id === conversation_id
+                    ? { ...conversation, unread_count: 0 }
+                    : conversation
+            )
+        );
+    }, []);
 
     const ensureConversation = useCallback((conversation: Conversation) => {
         upsertConversationInList(conversation);
@@ -385,7 +443,8 @@ export default function ConversationProvider({ children }: ProviderProps) {
             loadOlderMessages,
             ensureConversation,
             removeConversation,
-            addMessageToChat
+            addMessageToChat,
+            markConversationAsRead
         }}>
             {children}
         </conversationContext.Provider>

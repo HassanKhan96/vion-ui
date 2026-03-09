@@ -26,6 +26,7 @@ import { getConversationId } from "../../lib/conversation";
 import type { User as VionUser } from "../../interfaces/user.interface";
 import { GET_PENDING_FRIEND_REQUESTS } from "../../graphql/friends.queries";
 import { parseAppDate } from "../../lib/date";
+import { MessageStatus } from "./MessageStatus";
 
 type Props = {
   className?: string;
@@ -384,9 +385,26 @@ export const ChatSidebar = ({
                 </span>
               </div>
               <p className="text-sm text-muted-foreground truncate">
-                {conversation.last_message}
+                {conversation.last_message_sender_id === user?.id ? (
+                  <span className="inline-flex items-center gap-1">
+                    <MessageStatus
+                      status={(conversation as any).last_message_status ?? "sent"}
+                      className="h-3.5 w-3.5"
+                    />
+                    <span>{conversation.last_message}</span>
+                  </span>
+                ) : (
+                  conversation.last_message
+                )}
               </p>
             </div>
+            {Number((conversation as any).unread_count ?? 0) > 0 && (
+              <span className="ml-2 mt-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground">
+                {Number((conversation as any).unread_count) > 99
+                  ? "99+"
+                  : Number((conversation as any).unread_count)}
+              </span>
+            )}
           </button>
         ))}
       </div>

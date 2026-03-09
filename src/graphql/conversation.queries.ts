@@ -7,8 +7,11 @@ export const GET_CONVERSATIONS = gql`
       conversation_id
       type
       created_at
+      unread_count
       last_read_message_id
       last_message_id
+      last_message_sender_id
+      last_message_status
       last_message
       last_message_at
       other_user_id

@@ -61,6 +61,7 @@ export const ChatArea = ({
     chats,
     removeConversation,
     addMessageToChat,
+    markConversationAsRead,
   } = useConversation();
   const [deleteMyConversation] = useMutation(DELETE_MY_CONVERSATION);
   const hasSetTyping = useRef(false);
@@ -102,6 +103,7 @@ export const ChatArea = ({
           conversation_id: currentConversation,
           sender_id: senderId,
         });
+        markConversationAsRead(currentConversation);
 
         lastReadMessageId.current = unreadMessages.id;
       }

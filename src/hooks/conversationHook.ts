@@ -12,7 +12,8 @@ export const useConversation = () => {
         loadOlderMessages,
         ensureConversation,
         removeConversation,
-        addMessageToChat
+        addMessageToChat,
+        markConversationAsRead
     } = useContext(conversationContext);
 
     return {
@@ -24,6 +25,7 @@ export const useConversation = () => {
         loadOlderMessages,
         ensureConversation,
         removeConversation,
-        addMessageToChat
+        addMessageToChat,
+        markConversationAsRead
     }
 }
