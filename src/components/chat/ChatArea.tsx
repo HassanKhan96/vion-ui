@@ -190,7 +190,7 @@ export const ChatArea = ({
     if (shouldAutoScrollToBottom.current) {
       container.scrollTop = container.scrollHeight;
     }
-  }, [messages, currentConversation]);
+  }, [messages, currentConversation, currentChatUser?.isTyping]);
 
   useEffect(() => {
     markReadEvent(currentConversation, messages);
