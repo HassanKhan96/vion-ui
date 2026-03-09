@@ -28,6 +28,7 @@ import UserPresence from "./UserPresence";
 import { StartNewChat } from "./StartNewChat";
 import { useMutation } from "@apollo/client/react";
 import { DELETE_MY_CONVERSATION } from "../../graphql/conversation.queries";
+import { getAppTimestamp, parseAppDate } from "../../lib/date";
 
 type Props = {
   className?: string;
@@ -90,7 +91,7 @@ export const ChatArea = ({
 
       const sortedMessages = allMessages
         ?.filter((m) => m.sender !== "me" && m.status !== "read")
-        ?.sort((a, b) => Number(b.created_at) - Number(a.created_at));
+        ?.sort((a, b) => getAppTimestamp(b.created_at) - getAppTimestamp(a.created_at));
       const unreadMessages = sortedMessages?.at(0);
       if (!unreadMessages) return;
 
@@ -388,7 +389,9 @@ export const ChatArea = ({
               </div>
               <div className="flex items-center justify-end gap-1 mt-1 px-1">
                 <span className="text-[10px] text-muted-foreground">
-                  {format(Number(message.created_at), "hh:mm a")}
+                  {parseAppDate(message.created_at)
+                    ? format(parseAppDate(message.created_at) as Date, "hh:mm a")
+                    : "--:--"}
                 </span>
                 {message.sender === "me" && (
                   <MessageStatus status={message.status} />

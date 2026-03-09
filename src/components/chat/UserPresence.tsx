@@ -1,8 +1,11 @@
 import { format } from "date-fns";
+import { parseAppDate } from "../../lib/date";
 
 type Props = { status?: string; lastSeen?: number | null };
 
 export default function UserPresence({ status, lastSeen }: Props) {
+  const parsedLastSeen = parseAppDate(lastSeen);
+
   return (
     <span className="text-xs text-muted-foreground flex items-center gap-1.5">
       {status === "online" ? (
@@ -10,8 +13,8 @@ export default function UserPresence({ status, lastSeen }: Props) {
       ) : null}
       {status === "online"
         ? "Online"
-        : lastSeen
-          ? `Last seen ${format(lastSeen, "p")}`
+        : parsedLastSeen
+          ? `Last seen ${format(parsedLastSeen, "p")}`
           : ""}
     </span>
   );

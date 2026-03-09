@@ -5,6 +5,7 @@ import {
   MoreVertical,
   LogOut,
   Camera,
+  UserRoundPlus,
 } from "lucide-react";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/Button";
@@ -16,12 +17,15 @@ import { useAuth } from "../../hooks/authHook";
 import { useApi } from "../../hooks/useApi";
 import { useState, useRef, useEffect, type ChangeEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useMutation } from "@apollo/client/react";
+import { useLazyQuery, useMutation } from "@apollo/client/react";
 import { UPLOAD_MY_AVATAR } from "../../graphql/user.queries";
 import { getConfig } from "../../config/Application";
 import NewChatModal from "./NewChatModal";
+import FriendRequestsModal from "./FriendRequestsModal";
 import { getConversationId } from "../../lib/conversation";
 import type { User as VionUser } from "../../interfaces/user.interface";
+import { GET_PENDING_FRIEND_REQUESTS } from "../../graphql/friends.queries";
+import { parseAppDate } from "../../lib/date";
 
 type Props = {
   className?: string;
@@ -43,8 +47,14 @@ export const ChatSidebar = ({
   const { BASE_URL } = getConfig();
   const [uploadAvatar, { loading: avatarUploading }] =
     useMutation(UPLOAD_MY_AVATAR);
+  const [fetchPendingRequests] = useLazyQuery(GET_PENDING_FRIEND_REQUESTS, {
+    fetchPolicy: "network-only",
+  });
   const [menuOpen, setMenuOpen] = useState(false);
   const [isNewChatModalOpen, setIsNewChatModalOpen] = useState(false);
+  const [isFriendRequestsModalOpen, setIsFriendRequestsModalOpen] =
+    useState(false);
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -58,6 +68,22 @@ export const ChatSidebar = ({
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  useEffect(() => {
+    const loadPendingRequests = async () => {
+      try {
+        const { data } = await fetchPendingRequests();
+        const rows = ((data as any)?.myFriendRequests || []) as Array<{
+          id: string;
+        }>;
+        setPendingRequestsCount(rows.length);
+      } catch (_) {
+        setPendingRequestsCount(0);
+      }
+    };
+
+    void loadPendingRequests();
+  }, [fetchPendingRequests]);
 
   const handleLogout = async () => {
     try {
@@ -181,6 +207,12 @@ export const ChatSidebar = ({
     }
   };
 
+  const formatConversationTime = (value: string) => {
+    const parsed = parseAppDate(value);
+    if (!parsed) return "";
+    return formatDistanceToNow(parsed);
+  };
+
   return (
     <div
       className={cn(
@@ -270,13 +302,29 @@ export const ChatSidebar = ({
       <div className="p-4 border-b border-border space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-bold tracking-tight">Messages</h2>
-          <Button
-            size="icon"
-            variant="ghost"
-            onClick={() => setIsNewChatModalOpen(true)}
-          >
-            <Plus className="h-5 w-5" />
-          </Button>
+          <div className="flex items-center gap-1">
+            <div className="relative">
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => setIsFriendRequestsModalOpen(true)}
+              >
+                <UserRoundPlus className="h-5 w-5" />
+              </Button>
+              {pendingRequestsCount > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
+                  {pendingRequestsCount > 9 ? "9+" : pendingRequestsCount}
+                </span>
+              )}
+            </div>
+            <Button
+              size="icon"
+              variant="ghost"
+              onClick={() => setIsNewChatModalOpen(true)}
+            >
+              <Plus className="h-5 w-5" />
+            </Button>
+          </div>
         </div>
         <div className="relative">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -330,7 +378,9 @@ export const ChatSidebar = ({
                   {conversation.username}
                 </span>
                 <span className="text-xs text-muted-foreground whitespace-nowrap ml-2">
-                  {formatDistanceToNow(Number(conversation.created_at))}
+                  {formatConversationTime(
+                    conversation.last_message_at ?? conversation.created_at,
+                  )}
                 </span>
               </div>
               <p className="text-sm text-muted-foreground truncate">
@@ -346,6 +396,11 @@ export const ChatSidebar = ({
         currentUserId={user?.id}
         onClose={() => setIsNewChatModalOpen(false)}
         onStartChat={handleStartChatWithUser}
+      />
+      <FriendRequestsModal
+        open={isFriendRequestsModalOpen}
+        onClose={() => setIsFriendRequestsModalOpen(false)}
+        onPendingCountChange={setPendingRequestsCount}
       />
     </div>
   );

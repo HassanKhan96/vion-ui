@@ -16,6 +16,10 @@ type MessageSent = {
     created_at: string;
 }
 
+type SocketMessage = Message & {
+    conversation?: Conversation;
+}
+
 export type ConversationContextType = {
     conversations: Conversation[],
     chats: Record<string, Message[]>,
@@ -59,8 +63,12 @@ export default function ConversationProvider({ children }: ProviderProps) {
     const [hasMoreByConversation, setHasMoreByConversation] = useState<Record<string, boolean>>({});
     const [loadingOlderByConversation, setLoadingOlderByConversation] = useState<Record<string, boolean>>({});
 
-    const [getConversations] = useLazyQuery(GET_CONVERSATIONS);
-    const [getMessages] = useLazyQuery(GET_MESSAGES);
+    const [getConversations] = useLazyQuery(GET_CONVERSATIONS, {
+        fetchPolicy: "network-only",
+    });
+    const [getMessages] = useLazyQuery(GET_MESSAGES, {
+        fetchPolicy: "network-only",
+    });
 
 
     useEffect(() => {
@@ -77,6 +85,64 @@ export default function ConversationProvider({ children }: ProviderProps) {
             console.log(error)
         }
     }
+
+    const upsertConversationInList = useCallback((
+        nextConversation: Conversation,
+        latestMessage?: Pick<Message, "id" | "content" | "created_at">
+    ) => {
+        setConversations((prev) => {
+            const existing = prev.find(
+                (conversation) =>
+                    conversation.conversation_id === nextConversation.conversation_id
+            );
+
+            const mergedConversation = {
+                ...(existing ?? {}),
+                ...nextConversation,
+                ...(latestMessage
+                    ? {
+                        last_message_id: latestMessage.id,
+                        last_message: latestMessage.content,
+                        last_message_at: latestMessage.created_at,
+                    }
+                    : {}),
+            } as Conversation;
+
+            const remaining = prev.filter(
+                (conversation) =>
+                    conversation.conversation_id !== nextConversation.conversation_id
+            );
+
+            return [mergedConversation, ...remaining];
+        });
+    }, []);
+
+    const hydrateConversationIfMissing = useCallback(async (
+        conversation_id: string,
+        latestMessage?: Pick<Message, "id" | "content" | "created_at">
+    ) => {
+        const exists = conversations.some(
+            (conversation) => conversation.conversation_id === conversation_id
+        );
+
+        if (exists) {
+            return;
+        }
+
+        try {
+            const { data } = await getConversations();
+            const myConversations = ((data as any)?.myConversations || []) as Conversation[];
+            const matchedConversation = myConversations.find(
+                (conversation) => conversation.conversation_id === conversation_id
+            );
+
+            if (matchedConversation) {
+                upsertConversationInList(matchedConversation, latestMessage);
+            }
+        } catch (error) {
+            console.log(error);
+        }
+    }, [conversations, getConversations, upsertConversationInList]);
 
     const mergeUniqueMessages = (
         existing: Message[],
@@ -96,18 +162,12 @@ export default function ConversationProvider({ children }: ProviderProps) {
     };
 
     const updateMessageOnSent = useCallback((payload: MessageSent) => {
-
-        setConversations((prev) => {
-            return prev.map((c) =>
-                c.conversation_id === payload.conversation_id ?
-                    {
-                        ...c,
-                        last_message_id: payload.id,
-                        last_message_at: payload.created_at,
-                        last_message: payload.content
-                    }
-                    : c
-            );
+        upsertConversationInList({
+            conversation_id: payload.conversation_id,
+        } as Conversation, {
+            id: payload.id,
+            content: payload.content,
+            created_at: payload.created_at,
         });
 
         setChats((prev) => {
@@ -123,7 +183,7 @@ export default function ConversationProvider({ children }: ProviderProps) {
                 [payload.conversation_id]: updatedChat,
             };
         });
-    }, []);
+    }, [upsertConversationInList]);
 
 
     const markMessagesAsRead = useCallback((payload: { conversation_id: string }) => {
@@ -230,18 +290,31 @@ export default function ConversationProvider({ children }: ProviderProps) {
         }
     }, [chats, getChatFromId, getMessages, hasMoreByConversation, loadingOlderByConversation]);
 
-    const addMessageToChat = useCallback((message: Message) => {
-        setConversations(prev => prev.map(conversation => {
-            if (conversation.conversation_id === message.conversation_id) {
-                return {
-                    ...conversation,
-                    last_message: message.content,
-                    last_message_at: message.created_at,
-                    last_message_id: message.id
-                }
-            }
-            return conversation
-        }))
+    const addMessageToChat = useCallback((message: SocketMessage) => {
+        const existingConversation = conversations.find(
+            (conversation) => conversation.conversation_id === message.conversation_id
+        );
+
+        if (message.conversation) {
+            upsertConversationInList(message.conversation, {
+                id: message.id,
+                content: message.content,
+                created_at: message.created_at,
+            });
+        } else if (existingConversation) {
+            upsertConversationInList(existingConversation, {
+                id: message.id,
+                content: message.content,
+                created_at: message.created_at,
+            });
+        } else {
+            void hydrateConversationIfMissing(message.conversation_id, {
+                id: message.id,
+                content: message.content,
+                created_at: message.created_at,
+            });
+        }
+
         setChats(prev => ({
             ...prev,
             [message.conversation_id]: mergeUniqueMessages(
@@ -250,17 +323,11 @@ export default function ConversationProvider({ children }: ProviderProps) {
                 "append",
             )
         }));
-    }, []);
+    }, [conversations, hydrateConversationIfMissing, upsertConversationInList]);
 
     const ensureConversation = useCallback((conversation: Conversation) => {
-        setConversations((prev) => {
-            const exists = prev.some(
-                (item) => item.conversation_id === conversation.conversation_id
-            );
-            if (exists) return prev;
-            return [conversation, ...prev];
-        });
-    }, []);
+        upsertConversationInList(conversation);
+    }, [upsertConversationInList]);
 
     const removeConversation = useCallback((conversation_id: string) => {
         setConversations((prev) =>
